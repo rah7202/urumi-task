@@ -35,6 +35,9 @@ Urumi Cloud enables automated provisioning of isolated ecommerce stores (WooComm
 - Ingress: NGINX (local) / Traefik (prod)
 
 ---
+## Tech Stack Used 
+
+<img src="https://skill-icons.rpidiyar249.workers.dev/icons?i=react,tailwind,js,ts,nodejs,express,sqlite,docker,kubernetes,nginx,wordpress,mysql,gcp,vscode,git,github&perline=8" /> 
 
 ## Architecture
 
@@ -324,8 +327,8 @@ kubectl get nodes
 
 ```bash
 # SSH into VM
-git clone https://github.com/yourusername/urumi-store-orchestrator.git
-cd urumi-store-orchestrator/backend
+git clone https://github.com/rah7202/urumi-task.git
+cd urumi-task/backend
 ```
 
 #### 9. Deploy a Store
@@ -689,8 +692,8 @@ hard:
 #### Scaling Considerations
 
 **Current Capacity (Single Node):**
-- ~5-10 stores per e2-micro (1GB RAM)
-- ~20-30 stores per n1-standard-1 (3.75GB RAM)
+- ~5-10 stores per e2-micro (2GB RAM)
+- ~20-30 stores per n1-standard-1 (4GB RAM)
 
 **Scaling Bottlenecks:**
 1. **Node Resources:** Add more nodes (horizontal scale)
@@ -698,56 +701,6 @@ hard:
 3. **SQLite Writes:** Migrate to PostgreSQL
 4. **API Server:** Add replicas with load balancer
 5. **Ingress Routes:** Single Traefik handles 1000s of routes easily
-
----
-
-## Project Structure
-
-```
-urumi-store-orchestrator/
-├── backend/
-│   ├── src/
-│   │   ├── db/
-│   │   │   ├── index.js           # SQLite connection
-│   │   │   └── migrations.js      # DB schema
-│   │   ├── repositories/
-│   │   │   └── storeRepo.js       # Store CRUD operations
-│   │   └── server.js              # Express API server
-│   ├── charts/
-│   │   └── store-chart/
-│   │       ├── templates/
-│   │       │   ├── secret.yaml              # DB credentials
-│   │       │   ├── db-pvc.yaml              # MySQL persistent volume
-│   │       │   ├── mysql-deployment.yaml    # MySQL deployment
-│   │       │   ├── mysql-service.yaml       # MySQL service (headless)
-│   │       │   ├── wordpress-deployment.yaml# WordPress deployment
-│   │       │   ├── wordpress-service.yaml   # WordPress service
-│   │       │   ├── ingress.yaml             # Ingress routing
-│   │       │   ├── resourcequota.yaml       # Namespace quotas (optional)
-│   │       │   ├── limitrange.yaml          # Default limits (optional)
-│   │       │   └── NOTES.txt                # Post-install notes
-│   │       ├── Chart.yaml           # Helm chart metadata
-│   │       ├── values.yaml          # Default values
-│   │       ├── values-local.yaml    # Local overrides
-│   │       └── values-prod.yaml     # Production overrides
-│   ├── package.json
-│   └── stores.db                    # SQLite database (created at runtime)
-│
-├── frontend/
-│   ├── src/
-│   │   ├── App.tsx                  # Main dashboard component
-│   │   ├── main.tsx                 # React entry point
-│   │   └── index.css                # Tailwind styles
-│   ├── package.json
-│   └── vite.config.ts               # Vite bundler config
-│
-├── docs/
-│   └── architecture-diagram.png     # System architecture
-│
-├── .gitignore
-├── README.md                        # This file
-└── GCLOUD-DEPLOYMENT.md             # Detailed GCP setup guide
-```
 
 ---
 
@@ -851,7 +804,7 @@ Delete a store and all its resources.
 
 ---
 
-### Admin Endpoints (Bonus)
+### Metrics Endpoints 
 
 #### `GET /api/admin/metrics`
 Get platform metrics.
@@ -919,7 +872,9 @@ MIT License - see LICENSE file for details.
 
 ## Author
 
-Built for Urumi AI SDE Internship Round 1 by [Your Name]
+Built for Urumi AI SDE Internship Round 1 by [Rahul Pidiyar]
+
+LinkedIn: https://www.linkedin.com/in/rahul-pidiyar-101115284/
 
 GitHub: https://github.com/7202/urumi-task
 
