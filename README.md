@@ -2,8 +2,6 @@
 
 A production-ready platform for provisioning and managing isolated WooCommerce stores on Kubernetes using Helm charts and namespace-based multi-tenancy.
 
-![Platform Architecture](docs/architecture-diagram.png)
-
 ## 📋 Table of Contents
 
 - [Overview](#overview)
@@ -167,8 +165,8 @@ graph LR
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/yourusername/urumi-store-orchestrator.git
-cd urumi-store-orchestrator
+git clone https://github.com/rah7202/urumi-task.git
+cd urumi-task
 ```
 
 ### 2. Enable Kubernetes in Docker Desktop
