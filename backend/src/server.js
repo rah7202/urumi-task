@@ -46,7 +46,7 @@ const globalLimiter = rateLimit({
     max: 100,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Too many request at a time! Please try again later.' } // limit each IP to 100 requests per windowMs
+    message: { error: 'Too many request at a time! Please try again later.' }
 });
 
 const createStoreLimiter = rateLimit({
@@ -64,13 +64,12 @@ const deleteStoreLimiter = rateLimit({
 app.use(globalLimiter);
 
 
-
 const homeDir = os.homedir();
 const kubeConfigPath = path.join(homeDir, '.kube', 'config');
 console.log(`Loading KubeConfig from: ${kubeConfigPath}`);
 
 
-// Initialize Kubernetes Client
+// Initializing Kubernetes Client
 const kc = new k8s.KubeConfig();
 kc.loadFromFile(kubeConfigPath);
 
@@ -94,114 +93,18 @@ if (isProduction) {
 
 const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
 
-// Add this to your server.js startup
+
 console.log("Node.js is querying K8s at:", kc.getCurrentCluster().server);
 
 app.get('/api/stores', (req, res) => {
     try {
-        const stores = StoreRepo.findAll(); // Fetches instantly from SQLite
+        const stores = StoreRepo.findAll();
         res.json(stores);
     } catch (err) {
         console.error("DB Fetch Error:", err);
         res.status(500).json({ error: "Failed to load stores" });
     }
 });
-
-// app.post('/api/stores', async (req, res) => {
-//     const { storeName, engine } = req.body;
-//     const namespace = `store-${storeName.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
-//     const url = `http://${storeName}.local`;
-//     const createdAt = new Date().toISOString();
-
-//     console.log(`[CREATE] Starting provisioning for store: ${storeName}`);
-
-//     try {
-//         // 1️⃣ Create Namespace FIRST
-//         try {
-//             await k8sApi.createNamespace({
-//                 body: { metadata: { name: namespace } }
-//             });
-//             console.log(`[CREATE] ✅ Namespace ${namespace} created`);
-//         } catch (nsErr) {
-//             if (nsErr.response?.statusCode === 409) {
-//                 console.log(`[CREATE] ℹ️ Namespace ${namespace} already exists`);
-//             } else {
-//                 throw nsErr;
-//             }
-//         }
-
-//         // 2️⃣ Execute Helm Install (BEFORE DB save)
-//         const env = process.env.NODE_ENV === 'production' ? 'prod' : 'local';
-//         const chartPath = path.resolve(__dirname, "../charts/store-chart");
-//         const helmCommand = `helm install ${storeName} "${chartPath}" --namespace ${namespace} -f "${chartPath}/values.yaml" -f "${chartPath}/values-${env}.yaml" --set ingress.host=${storeName}.local`;
-
-//         console.log(`[CREATE] Executing: ${helmCommand}`);
-
-//         try {
-//             const { stdout, stderr } = await execPromise(helmCommand);
-//             console.log(`[CREATE] ✅ Helm install success: ${stdout}`);
-//             if (stderr) console.warn(`[CREATE] Helm stderr: ${stderr}`);
-//         } catch (helmErr) {
-//             console.error(`[CREATE] ❌ Helm install failed: ${helmErr.message}`);
-//             console.error(`[CREATE] Helm stderr: ${helmErr.stderr}`);
-
-//             // Cleanup namespace since Helm failed
-//             try {
-//                 await k8sApi.deleteNamespace(namespace);
-//                 console.log(`[CREATE] 🧹 Cleaned up namespace after Helm failure`);
-//             } catch (cleanupErr) {
-//                 console.error(`[CREATE] Failed to cleanup namespace: ${cleanupErr.message}`);
-//             }
-
-//             return res.status(500).json({
-//                 success: false,
-//                 error: 'Helm installation failed',
-//                 details: helmErr.message
-//             });
-//         }
-
-//         // 3️⃣ Save to SQLite ONLY AFTER Helm succeeds
-//         try {
-//             StoreRepo.create({
-//                 storeName,
-//                 engine,
-//                 namespace,
-//                 status: "Provisioning",
-//                 url,
-//                 createdAt
-//             });
-//             console.log(`[CREATE] ✅ Saved to database`);
-//         } catch (dbErr) {
-//             console.error(`[CREATE] ❌ Database save failed: ${dbErr.message}`);
-
-//             // Helm installed but DB failed - this is a problem
-//             // You might want to uninstall Helm here or mark it somehow
-//             return res.status(500).json({
-//                 success: false,
-//                 error: 'Database save failed after Helm install',
-//                 details: dbErr.message,
-//                 warning: 'Store may be running in cluster but not tracked in DB'
-//             });
-//         }
-
-//         // 4️⃣ Send success response
-//         res.status(201).json({
-//             success: true,
-//             status: 'Provisioning',
-//             storeName,
-//             namespace,
-//             url
-//         });
-
-//     } catch (err) {
-//         console.error("[CREATE] Unexpected error:", err.body || err);
-//         res.status(500).json({
-//             success: false,
-//             error: 'Store provisioning failed',
-//             details: err.message
-//         });
-//     }
-// });
 
 app.post('/api/stores', createStoreLimiter, async (req, res) => {
     const { storeName, engine } = req.body;
@@ -212,7 +115,6 @@ app.post('/api/stores', createStoreLimiter, async (req, res) => {
 
     console.log(`[CREATE] Starting provisioning for store: ${storeName}`);
 
-    // ── Audit: store creation started ──
     auditLog({
         action: 'CREATE_STARTED',
         storeName,
@@ -224,7 +126,7 @@ app.post('/api/stores', createStoreLimiter, async (req, res) => {
     });
 
     try {
-        // 1️⃣ Create Namespace
+        // Creating Namespace
         try {
             await k8sApi.createNamespace({
                 body: { metadata: { name: namespace } }
@@ -238,7 +140,7 @@ app.post('/api/stores', createStoreLimiter, async (req, res) => {
             }
         }
 
-        // 2️⃣ Execute Helm Install
+        // Executing Helm Install
         const env = process.env.NODE_ENV === 'production' ? 'prod' : 'local';
         const chartPath = path.resolve(__dirname, "../charts/store-chart");
         const helmCommand = `helm install ${storeName} "${chartPath}" --namespace ${namespace} -f "${chartPath}/values.yaml" -f "${chartPath}/values-${env}.yaml" --set ingress.host=${storeName}.local`;
@@ -252,7 +154,7 @@ app.post('/api/stores', createStoreLimiter, async (req, res) => {
         } catch (helmErr) {
             console.error(`[CREATE] ❌ Helm install failed: ${helmErr.message}`);
 
-            // Cleanup namespace since Helm failed
+            // Cleaning namespace since Helm failed
             try {
                 await k8sApi.deleteNamespace({ name: namespace });
                 console.log(`[CREATE] 🧹 Cleaned up namespace after Helm failure`);
@@ -260,7 +162,6 @@ app.post('/api/stores', createStoreLimiter, async (req, res) => {
                 console.error(`[CREATE] Failed to cleanup namespace: ${cleanupErr.message}`);
             }
 
-            // ── Audit: helm failed ──
             auditLog({
                 action: 'CREATE_FAILED',
                 storeName,
@@ -278,14 +179,13 @@ app.post('/api/stores', createStoreLimiter, async (req, res) => {
             });
         }
 
-        // 3️⃣ Save to SQLite ONLY AFTER Helm succeeds
+        // Saving to SQLite ONLY AFTER Helm succeeds
         try {
             StoreRepo.create({ storeName, engine, namespace, status: "Provisioning", url, createdAt });
             console.log(`[CREATE] ✅ Saved to database`);
         } catch (dbErr) {
             console.error(`[CREATE] ❌ Database save failed: ${dbErr.message}`);
 
-            // ── Audit: db failed ──
             auditLog({
                 action: 'CREATE_DB_FAILED',
                 storeName,
@@ -304,7 +204,6 @@ app.post('/api/stores', createStoreLimiter, async (req, res) => {
             });
         }
 
-        // ── Audit: success ──
         auditLog({
             action: 'CREATE_SUCCESS',
             storeName,
@@ -370,14 +269,14 @@ app.get('/api/stores/:name/status', async (req, res) => {
             return res.json({ status: 'Provisioning', podsFound: [] });
         }
 
-        // ✅ IMPROVED: Check if essential pods are ready
+        // Checking if essential pods are ready
         const wordpressPods = pods.filter(p =>
             p.metadata.name.includes('wordpress') || p.metadata.name.includes('store-chart')
         );
 
         const mysqlPods = pods.filter(p => p.metadata.name.includes('mysql'));
 
-        // Check if WordPress is running (ignore CrashLoopBackOff pods if we have a working one)
+        // Checking if WordPress is running (ignore CrashLoopBackOff pods if we have a working one)
         const workingWordpressPod = wordpressPods.find(pod =>
             pod.status.phase === 'Running' &&
             pod.status.containerStatuses &&
@@ -394,7 +293,7 @@ app.get('/api/stores/:name/status', async (req, res) => {
         const isReady = workingWordpressPod && mysqlReady;
         const newStatus = isReady ? 'Ready' : 'Installing';
 
-        // Add right after you get the pods
+        // Adding this for debugging 
         // console.log('[DEBUG] All pods:', pods.map(p => ({
         //     name: p.metadata.name,
         //     phase: p.status.phase,
@@ -435,101 +334,6 @@ app.get('/api/stores/:name/status', async (req, res) => {
     }
 });
 
-// app.delete('/api/stores/:name', async (req, res) => {
-//     const storeName = req.params.name;
-//     const errors = [];
-//     let deleteSuccess = false;
-
-//     console.log(`[DELETE] Starting cleanup for store: ${storeName}`);
-
-//     try {
-//         // 1️⃣ Get store from database
-//         const store = db.prepare(`SELECT * FROM stores WHERE store_name = ? OR namespace = ?`)
-//             .get(storeName, storeName);
-
-//         if (!store) {
-//             return res.status(404).json({
-//                 success: false,
-//                 message: `Store ${storeName} not found`
-//             });
-//         }
-
-//         console.log(`[DELETE] Found store:`, {
-//             name: store.store_name,
-//             namespace: store.namespace,
-//             status: store.status
-//         });
-
-//         // 2️⃣ Helm uninstall
-//         try {
-//             const { stdout, stderr } = await execPromise(`helm uninstall ${storeName} --namespace ${store.namespace}`);
-//             console.log(`[DELETE] ✅ Helm uninstalled: ${stdout}`);
-//             if (stderr) console.warn(`[DELETE] Helm stderr: ${stderr}`);
-//         } catch (helmErr) {
-//             const errMsg = `Helm uninstall failed: ${helmErr.message}`;
-//             console.warn(`[DELETE] ⚠️ ${errMsg}`);
-//             errors.push(errMsg);
-//         }
-
-//         // 3️⃣ Delete namespace
-//         try {
-//             await k8sApi.deleteNamespace({ name: store.namespace });
-//             //await k8sApi.deleteNamespace(`store-${storeName}`);
-//             //await k8sApi.deleteNamespace(store.namespace); 
-//             console.log(`[DELETE] ✅ Namespace ${store.namespace} deletion initiated`);
-
-//             await new Promise(resolve => setTimeout(resolve, 2000));
-//         } catch (nsErr) {
-//             if (nsErr.response?.statusCode === 404) {
-//                 console.log(`[DELETE] ℹ️ Namespace already gone`);
-//             } else {
-//                 const errMsg = `Namespace deletion failed: ${nsErr.message}`;
-//                 console.warn(`[DELETE] ⚠️ ${errMsg}`);
-//                 console.error(`[DELETE] Full error:`, nsErr.body || nsErr);
-//                 errors.push(errMsg);
-//             }
-//         }
-
-//         // 4️⃣ Always delete from database (even if K8s cleanup failed)
-//         try {
-//             StoreRepo.deleteById(store.id);
-//             console.log(`[DELETE] ✅ Removed from database`);
-//             deleteSuccess = true;
-//         } catch (dbErr) {
-//             const errMsg = `Database deletion failed: ${dbErr.message}`;
-//             console.error(`[DELETE] ❌ ${errMsg}`);
-//             errors.push(errMsg);
-//         }
-
-//         // 5️⃣ Return response
-//         if (deleteSuccess) {
-//             res.json({
-//                 success: true,
-//                 message: `Store ${storeName} deleted`,
-//                 warnings: errors.length > 0 ? errors : undefined,
-//                 deletedStore: {
-//                     name: storeName,
-//                     namespace: store.namespace
-//                 }
-//             });
-//         } else {
-//             res.status(500).json({
-//                 success: false,
-//                 message: 'Failed to delete store from database',
-//                 errors
-//             });
-//         }
-
-//     } catch (err) {
-//         console.error(`[DELETE ERROR]`, err);
-//         res.status(500).json({
-//             success: false,
-//             error: err.message,
-//             //stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-//         });
-//     }
-// });
-
 app.delete('/api/stores/:name', deleteStoreLimiter, async (req, res) => {
     const storeName = req.params.name;
     const ip = req.ip || req.connection.remoteAddress;
@@ -548,7 +352,6 @@ app.delete('/api/stores/:name', deleteStoreLimiter, async (req, res) => {
 
         console.log(`[DELETE] Found store:`, { name: store.store_name, namespace: store.namespace });
 
-        // ── Audit: delete started ──
         auditLog({
             action: 'DELETE_STARTED',
             storeName,
@@ -559,7 +362,7 @@ app.delete('/api/stores/:name', deleteStoreLimiter, async (req, res) => {
             ip
         });
 
-        // 2️⃣ Helm uninstall
+        // Helm uninstall
         try {
             const { stdout, stderr } = await execPromise(`helm uninstall ${storeName} --namespace ${store.namespace}`);
             console.log(`[DELETE] ✅ Helm uninstalled: ${stdout}`);
@@ -570,7 +373,7 @@ app.delete('/api/stores/:name', deleteStoreLimiter, async (req, res) => {
             errors.push(errMsg);
         }
 
-        // 3️⃣ Delete namespace
+        // Deleting namespace
         try {
             await k8sApi.deleteNamespace({ name: store.namespace });
             console.log(`[DELETE] ✅ Namespace ${store.namespace} deletion initiated`);
@@ -585,7 +388,7 @@ app.delete('/api/stores/:name', deleteStoreLimiter, async (req, res) => {
             }
         }
 
-        // 4️⃣ Remove from DB
+        // Removing from DB
         try {
             StoreRepo.deleteById(store.id);
             console.log(`[DELETE] ✅ Removed from database`);
@@ -596,7 +399,6 @@ app.delete('/api/stores/:name', deleteStoreLimiter, async (req, res) => {
             errors.push(errMsg);
         }
 
-        // ── Audit: delete result ──
         auditLog({
             action: deleteSuccess ? 'DELETE_SUCCESS' : 'DELETE_FAILED',
             storeName,
