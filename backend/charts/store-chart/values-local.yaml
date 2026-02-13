@@ -1,0 +1,9 @@
+# Settings for Kind/Minikube/k3d
+ingress:
+  enabled: true
+  hosts:
+    - host: "store.local"   # Local domain (you'll add to your 'hosts' file)
+
+db:
+  persistence:
+    storageClass: "hostpath" # Common local storage class

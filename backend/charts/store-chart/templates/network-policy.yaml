@@ -1,0 +1,96 @@
+---
+# Deny ALL ingress and egress by default
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-default-deny
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector: {}  # Applies to ALL pods in namespace
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# Allow WordPress → MySQL on port 3306
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-allow-wordpress-to-mysql
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ include "store-chart.name" . }}
+      tier: mysql
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: {{ include "store-chart.name" . }}
+              tier: frontend
+      ports:
+        - protocol: TCP
+          port: 3306
+
+---
+# Allow ingress-nginx → WordPress on port 80
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-allow-ingress-to-wordpress
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ include "store-chart.name" . }}
+      tier: frontend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 80
+
+---
+# Allow WordPress egress: DNS + MySQL only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-allow-wordpress-egress
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ include "store-chart.name" . }}
+      tier: frontend
+  policyTypes:
+    - Egress
+  egress:
+    # Allow DNS resolution
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow talking to MySQL in same namespace
+    - to:
+        - podSelector:
+            matchLabels:
+              app: {{ include "store-chart.name" . }}
+              tier: mysql
+      ports:
+        - protocol: TCP
+          port: 3306
+    # Allow outbound HTTP/HTTPS (for WordPress plugin downloads)
+    - ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443

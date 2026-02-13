@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: {{ .Release.Name }}-limitrange
+  namespace: {{ .Release.Namespace }}
+spec:
+  limits:
+    # Default limits applied to every container automatically
+    - type: Container
+      default:
+        cpu: "500m"
+        memory: "512Mi"
+      defaultRequest:
+        cpu: "100m"
+        memory: "128Mi"
+      max:
+        cpu: "1"
+        memory: "1Gi"
+      min:
+        cpu: "50m"
+        memory: "64Mi"
+    # PVC size limits
+    - type: PersistentVolumeClaim
+      max:
+        storage: "5Gi"
+      min:
+        storage: "100Mi"

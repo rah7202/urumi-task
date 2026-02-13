@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "store-chart.fullname" . }}-db-pvc
+  namespace: {{ .Release.Namespace }} # Uses the namespace your server.js created
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.db.persistence.size | default "2Gi" }}
+  {{- if .Values.db.persistence.storageClass }}
+  storageClassName: {{ .Values.db.persistence.storageClass }}
+  {{- end }}
