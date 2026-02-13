@@ -26,6 +26,3 @@ npm-debug.log*
 # Kube config (never push this!)
 .kube/
 kubeconfig*
-
-#Notes
-.notes.txt

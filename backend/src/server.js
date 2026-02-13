@@ -65,8 +65,6 @@ app.use(globalLimiter);
 
 
 
-
-
 const homeDir = os.homedir();
 const kubeConfigPath = path.join(homeDir, '.kube', 'config');
 console.log(`Loading KubeConfig from: ${kubeConfigPath}`);
@@ -76,16 +74,23 @@ console.log(`Loading KubeConfig from: ${kubeConfigPath}`);
 const kc = new k8s.KubeConfig();
 kc.loadFromFile(kubeConfigPath);
 
-const cluster = kc.clusters.find(c => c.name === 'docker-desktop');
-const user = kc.users.find(u => u.name === 'docker-desktop');
+const isProduction = process.env.NODE_ENV === 'production';
 
-if (cluster && user) {
-    kc.loadFromClusterAndUser(cluster, user);
-    console.log("Forced K8s to use Docker Desktop cluseter and user objects.");
+if (isProduction) {
+    kc.loadFromFile(kubeConfigPath);
+    console.log("Production mode: uisng kubeconfig directlty");
+
 } else {
-    kc.setCurrentContext('docker-desktop');
-}
+    const cluster = kc.clusters.find(c => c.name === 'docker-desktop');
+    const user = kc.users.find(u => u.name === 'docker-desktop');
 
+    if (cluster && user) {
+        kc.loadFromClusterAndUser(cluster, user);
+        console.log("Forced K8s to use Docker Desktop cluseter and user objects.");
+    } else {
+        kc.setCurrentContext('docker-desktop');
+    }
+}
 
 const k8sApi = kc.makeApiClient(k8s.CoreV1Api);
 

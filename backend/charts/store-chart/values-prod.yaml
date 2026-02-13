@@ -1,64 +1,21 @@
-# ============================================================
-# values-prod.yaml — Production overrides for VPS / k3s
-# Usage: helm install <store-name> ./store-chart \
-#          -f values.yaml \
-#          -f values-prod.yaml \
-#          --set ingress.hosts[0].host=<store-name>.yourdomain.com
-# ============================================================
-
-# ── Ingress ──────────────────────────────────────────────────
+# Production overrides for k3s on GCP VM
 ingress:
   enabled: true
-  className: nginx
-  annotations:
-    # Uncomment when cert-manager is installed for auto TLS:
-    # cert-manager.io/cluster-issuer: letsencrypt-prod
-    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+  className: "traefik"        # k3s uses Traefik by default
+  annotations: {}
   hosts:
-    - host: "REPLACE_WITH_STORE_DOMAIN"   # e.g. my-store.yourdomain.com
+    - host: "store.local"     # Gets overridden per store via --set
       paths:
         - path: /
           pathType: Prefix
-  # Uncomment for TLS (requires cert-manager):
-  # tls:
-  #   - secretName: store-tls
-  #     hosts:
-  #       - REPLACE_WITH_STORE_DOMAIN
+  tls: []
 
-# ── Storage ───────────────────────────────────────────────────
 db:
+  rootPassword: "prod-secure-password"
+  name: "wordpress"
   persistence:
-    # k3s default storage class (local-path provisioner)
-    storageClass: "local-path"
+    storageClass: "local-path"   # k3s default storage class
     size: 5Gi
 
-# ── Image pull policy ─────────────────────────────────────────
 image:
-  pullPolicy: Always   # Always pull latest in production
-
-# ── Resource limits (production pods get more resources) ──────
-resources:
-  wordpress:
-    requests:
-      cpu: "200m"
-      memory: "256Mi"
-    limits:
-      cpu: "1"
-      memory: "1Gi"
-  mysql:
-    requests:
-      cpu: "200m"
-      memory: "256Mi"
-    limits:
-      cpu: "1"
-      memory: "1Gi"
-
-# ── What changes local → prod (summary for README) ─────────────
-# | Setting          | Local (values-local.yaml) | Prod (this file)        |
-# |------------------|---------------------------|-------------------------|
-# | storageClass     | hostpath                  | local-path (k3s)        |
-# | ingress host     | store.local               | store.yourdomain.com    |
-# | TLS              | none                      | cert-manager (optional) |
-# | pullPolicy       | IfNotPresent              | Always                  |
-# | resource limits  | none                      | defined above           |
+  pullPolicy: Always
