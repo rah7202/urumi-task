@@ -333,13 +333,9 @@ function App() {
                         </div>
                     </div>
                 )}
-
-
-
-
             </div>
 
-            {/* <footer className="w-full">
+            <footer className="w-full mt-30">
                 <div className="flex justify-center py-8 space-x-2">
                     <a href="https://github.com/rah7202/urumi-task" target="_blank">
                         <svg xmlns="http://www.w3.org/2000/svg" xmlnsXlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" width="32" height="32" preserveAspectRatio="xMidYMid meet" viewBox="0 0 24 24" className="w-6 h-6 text-gray-600 hover:text-gray-800 button--github transition">
@@ -347,8 +343,7 @@ function App() {
                         </svg>
                     </a>
                 </div>
-            </footer> */}
-
+            </footer>
         </div>
     );
 }
