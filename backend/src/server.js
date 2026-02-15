@@ -88,7 +88,7 @@ const kc = new k8s.KubeConfig();
 kc.loadFromFile(kubeConfigPath);
 
 //const isProduction = process.env.NODE_ENV === 'production'; 
-const isProduction = require('fs').existsSync('/homw/rpidiyar249/.kube/config') && process.env.NODE_ENV !== 'development';
+const isProduction = require('fs').existsSync('/home/rpidiyar249/.kube/config') && process.env.NODE_ENV !== 'development';
 
 if (isProduction) {
     kc.loadFromFile(kubeConfigPath);
