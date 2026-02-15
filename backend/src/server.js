@@ -39,7 +39,21 @@ const os = require('os');
 
 const app = express();
 app.use(express.json());
-app.use(cors());
+//app.use(cors());
+
+app.use(cors({
+    origin: [
+        'http://localhost:5173',
+        'http://localhost:3001',
+        'https://urumi-task-18bsn1hh9-rah7202s-projects.vercel.app',
+        /\.vercel\.app$/,
+        /\.trycloudflare\.com$/
+    ],
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}))
+
+app.set('trust proxy', 1);
 
 const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
@@ -110,7 +124,9 @@ app.post('/api/stores', createStoreLimiter, async (req, res) => {
     const { storeName, engine } = req.body;
     const ip = req.ip || req.connection.remoteAddress;
     const namespace = `store-${storeName.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
-    const url = `http://${storeName}.local`;
+    //const url = `http://${storeName}.local`;
+    const storeHost = process.env.NODE_ENV === 'production' ? `${storeName}.34.135.50.141.nip.io` : `${storeName}.local`;
+    const url = `http://${storeHost}`;
     const createdAt = new Date().toISOString();
 
     console.log(`[CREATE] Starting provisioning for store: ${storeName}`);
@@ -143,8 +159,9 @@ app.post('/api/stores', createStoreLimiter, async (req, res) => {
         // Executing Helm Install
         const env = process.env.NODE_ENV === 'production' ? 'prod' : 'local';
         const chartPath = path.resolve(__dirname, "../charts/store-chart");
-        const helmCommand = `helm install ${storeName} "${chartPath}" --namespace ${namespace} -f "${chartPath}/values.yaml" -f "${chartPath}/values-${env}.yaml" --set ingress.host=${storeName}.local`;
+        //const helmCommand = `helm install ${storeName} "${chartPath}" --namespace ${namespace} -f "${chartPath}/values.yaml" -f "${chartPath}/values-${env}.yaml" --set ingress.host=${storeName}.local`;
 
+        const helmCommand = `helm install ${storeName} "${chartPath}" --namespace ${namespace} -f "${chartPath}/values.yaml" -f "${chartPath}/values-${env}.yaml" --set ingress.host=${storeHost}`;
         console.log(`[CREATE] Executing: ${helmCommand}`);
 
         try {
