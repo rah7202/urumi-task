@@ -1,10 +1,4 @@
-# ============================================================
-# values-prod.yaml — Production overrides for GCP k3s
-# Usage: helm install <store-name> ./store-chart \
-#          -f values.yaml \
-#          -f values-prod.yaml \
-#          --set ingress.host=<store-name>.34.135.50.141.nip.io
-# ============================================================
+
 
 # ── Ingress ──────────────────────────────────────────────────
 ingress:
@@ -43,11 +37,3 @@ resources:
       cpu: "1"
       memory: "1Gi"
 
-# ── What changes local → prod ─────────────────────────────────
-# | Setting          | Local (values-local.yaml) | Prod (this file)        |
-# |------------------|---------------------------|-------------------------|
-# | storageClass     | hostpath                  | local-path (k3s)        |
-# | ingressClassName | nginx                     | traefik                 |
-# | ingress host     | store.local               | store.IP.nip.io         |
-# | pullPolicy       | IfNotPresent              | Always                  |
-# | resource limits  | none                      | defined above           |

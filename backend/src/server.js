@@ -87,7 +87,8 @@ console.log(`Loading KubeConfig from: ${kubeConfigPath}`);
 const kc = new k8s.KubeConfig();
 kc.loadFromFile(kubeConfigPath);
 
-const isProduction = process.env.NODE_ENV === 'production';
+//const isProduction = process.env.NODE_ENV === 'production'; 
+const isProduction = require('fs').existsSync('/homw/rpidiyar249/.kube/config') && process.env.NODE_ENV !== 'development';
 
 if (isProduction) {
     kc.loadFromFile(kubeConfigPath);
@@ -125,7 +126,7 @@ app.post('/api/stores', createStoreLimiter, async (req, res) => {
     const ip = req.ip || req.connection.remoteAddress;
     const namespace = `store-${storeName.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
     //const url = `http://${storeName}.local`;
-    const storeHost = process.env.NODE_ENV === 'production' ? `${storeName}.34.135.50.141.nip.io` : `${storeName}.local`;
+    const storeHost = isProduction ? `${storeName}.34.135.50.141.nip.io` : `${storeName}.local`;
     const url = `http://${storeHost}`;
     const createdAt = new Date().toISOString();
 
@@ -156,8 +157,9 @@ app.post('/api/stores', createStoreLimiter, async (req, res) => {
             }
         }
 
-        // Executing Helm Install
-        const env = process.env.NODE_ENV === 'production' ? 'prod' : 'local';
+        // Executing Helm Install 
+        //const env = process.env.NODE_ENV === 'production' ? 'prod' : 'local';
+        const env = isProduction ? 'prod' : 'local';
         const chartPath = path.resolve(__dirname, "../charts/store-chart");
         //const helmCommand = `helm install ${storeName} "${chartPath}" --namespace ${namespace} -f "${chartPath}/values.yaml" -f "${chartPath}/values-${env}.yaml" --set ingress.host=${storeName}.local`;
 
