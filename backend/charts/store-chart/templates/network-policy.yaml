@@ -6,7 +6,7 @@ metadata:
   name: {{ .Release.Name }}-default-deny
   namespace: {{ .Release.Namespace }}
 spec:
-  podSelector: {}  # Applies to ALL pods in namespace
+  podSelector: {}
   policyTypes:
     - Ingress
     - Egress
@@ -36,7 +36,8 @@ spec:
           port: 3306
 
 ---
-# Allow ingress-nginx → WordPress on port 80
+# Allow ingress controller → WordPress on port 80
+# Works for BOTH nginx (ingress-nginx namespace) and traefik (kube-system namespace)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -51,15 +52,20 @@ spec:
     - Ingress
   ingress:
     - from:
+        # Allow from ingress-nginx namespace (local)
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: ingress-nginx
+        # Allow from kube-system namespace (traefik on k3s/GCP)
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
       ports:
         - protocol: TCP
           port: 80
 
 ---
-# Allow WordPress egress: DNS + MySQL only
+# Allow WordPress egress: DNS + MySQL + HTTP/HTTPS
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -73,13 +79,11 @@ spec:
   policyTypes:
     - Egress
   egress:
-    # Allow DNS resolution
     - ports:
         - protocol: UDP
           port: 53
         - protocol: TCP
           port: 53
-    # Allow talking to MySQL in same namespace
     - to:
         - podSelector:
             matchLabels:
@@ -88,7 +92,6 @@ spec:
       ports:
         - protocol: TCP
           port: 3306
-    # Allow outbound HTTP/HTTPS (for WordPress plugin downloads)
     - ports:
         - protocol: TCP
           port: 80
