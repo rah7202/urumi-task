@@ -1,0 +1,2 @@
+my-test-store-1 password admin / admin@Pass123 / admin@example.com
+my-test-store-2 password admin / admin2@Pass123 / admin2@example.com 
