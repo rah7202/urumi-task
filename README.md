@@ -31,6 +31,8 @@ Urumi Cloud enables automated provisioning of isolated ecommerce stores (WooComm
 - Infrastructure: Kubernetes (Docker Desktop local / k3s prod)
 - Package Manager: Helm 3
 - Ingress: NGINX (local) / Traefik (prod)
+- Frontend Hosting: Vercel
+- Tunneling: Cloudflare Tunnel (HTTPS for backend)
 
 ---
 ## Tech Stack Used 
@@ -44,45 +46,78 @@ Urumi Cloud enables automated provisioning of isolated ecommerce stores (WooComm
 ```mermaid
 graph TB
     subgraph "User Interface"
-        A[React Dashboard]
+        A[React Dashboard<br/>Vercel CDN]
+    end
+
+    subgraph "Cloudflare"
+        CF[Cloudflare Tunnel<br/>HTTPS Proxy]
     end
     
-    subgraph "Backend API"
-        B[Express Server<br/>Node.js]
+    subgraph "GCP VM - k3s"
+        B[Express Server<br/>Node.js + PM2]
         C[(SQLite DB)]
+        
+        subgraph "k3s Kubernetes"
+            D[Helm CLI]
+            I[Traefik Ingress]
+            
+            subgraph "Store Namespace 1"
+                E1[WordPress Pod]
+                F1[MySQL Pod]
+                G1[PVC - local-path]
+                H1[Ingress]
+            end
+            
+            subgraph "Store Namespace 2"
+                E2[WordPress Pod]
+                F2[MySQL Pod]
+                G2[PVC - local-path]
+                H2[Ingress]
+            end
+        end
     end
     
-    subgraph "Kubernetes Cluster"
-        D[Helm CLI]
-        
-        subgraph "Store Namespace 1"
-            E1[WordPress Pod]
-            F1[MySQL Pod]
-            G1[PVC]
-            H1[Ingress]
-        end
-        
-        subgraph "Store Namespace 2"
-            E2[WordPress Pod]
-            F2[MySQL Pod]
-            G2[PVC]
-            H2[Ingress]
-        end
-        
-        I[Ingress Controller<br/>NGINX/Traefik]
-    end
-    
-    A -->|REST API| B
+    A -->|HTTPS REST API| CF
+    CF -->|HTTP| B
     B -->|Store metadata| C
     B -->|helm install/uninstall| D
     D -->|Provision resources| E1
     D -->|Provision resources| E2
     E1 --> F1
     E2 --> F2
-    I -->|Route traffic| E1
-    I -->|Route traffic| E2
+    I -->|Route via nip.io| E1
+    I -->|Route via nip.io| E2
     H1 -.->|Routes| I
     H2 -.->|Routes| I
+```
+
+### Deployment Architecture
+
+```mermaid
+graph LR
+    subgraph "Frontend - Vercel"
+        V[urumi-task.vercel.app<br/>React + Vite]
+    end
+
+    subgraph "Tunneling - Cloudflare"
+        CF[Cloudflare Tunnel<br/>HTTPS ↔ HTTP bridge<br/>PM2 managed]
+    end
+
+    subgraph "Backend - GCP VM e2-small"
+        BE[Express API<br/>Port 3001<br/>PM2]
+        DB[(SQLite<br/>stores.db)]
+        K8S[k3s Cluster<br/>Traefik Ingress]
+    end
+
+    subgraph "Store Access"
+        S1[store-name.IP.nip.io<br/>WordPress + WooCommerce]
+    end
+
+    V -->|VITE_API_URL| CF
+    CF --> BE
+    BE --> DB
+    BE -->|helm install| K8S
+    K8S --> S1
 ```
 
 ### Store Provisioning Flow
@@ -240,7 +275,18 @@ Open browser: `http://localhost:5173`
 
 ## Production Deployment
 
-### Google Cloud Platform (Free Tier)
+### Architecture Overview
+
+```
+Vercel (Frontend) → Cloudflare Tunnel (HTTPS) → GCP VM (Backend + k3s)
+```
+
+- **Frontend** is deployed on Vercel for global CDN delivery
+- **Backend** runs on GCP e2-small VM managed by PM2
+- **Cloudflare Tunnel** provides HTTPS bridge (no open ports needed)
+- **Stores** are accessible via `nip.io` wildcard DNS
+
+### Google Cloud Platform (k3s) Setup
 
 #### 1. Create GCP VM
 
@@ -249,104 +295,119 @@ Open browser: `http://localhost:5173`
 # Create instance with:
 # - Name: k3s-server
 # - Region: us-central1 (free tier)
-# - Machine type: e2-micro (free tier)
+# - Machine type: e2-small (2GB RAM)
 # - Boot disk: Ubuntu 22.04 LTS, 30GB
 # - Firewall: Allow HTTP & HTTPS traffic
 ```
 
-#### 2. SSH into VM
+#### 2. SSH into VM and Install k3s
 
 ```bash
-# From GCP Console, click "SSH" button
-# Or use gcloud CLI:
-gcloud compute ssh k3s-server --zone=us-central1-a
-```
-
-#### 3. Install k3s
-
-```bash
-# Update system
 sudo apt update && sudo apt upgrade -y
-
-# Install k3s (lightweight Kubernetes)
 curl -sfL https://get.k3s.io | sh -
 
-# Verify installation
+# Verify
 sudo kubectl get nodes
-# Should show: k3s-server   Ready   control-plane,master
 ```
 
-#### 4. Get External IP
+#### 3. Add Swap Space (Required for e2-small)
 
 ```bash
-curl ifconfig.me
-# Note this IP - you'll use it for ingress hostnames
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ```
 
-#### 5. Configure Local kubectl Access
-
-On the **VM**:
-```bash
-sudo cat /etc/rancher/k3s/k3s.yaml
-```
-
-On your **local machine**:
-```bash
-# Create config file
-mkdir -p ~/.kube
-nano ~/.kube/gcloud-config
-
-# Paste the k3s.yaml content
-# IMPORTANT: Replace this line:
-#   server: https://127.0.0.1:6443
-# With:
-#   server: https://YOUR_EXTERNAL_IP:6443
-```
-
-#### 6. Open Firewall for kubectl
-
-In GCP Console → VPC Network → Firewall → Create:
-```
-Name: allow-k3s-api
-Targets: All instances
-Source IP ranges: YOUR_HOME_IP/32  (from whatismyip.com)
-Protocols: tcp:6443
-```
-
-#### 7. Test kubectl Access
+#### 4. Clone Repository
 
 ```bash
-export KUBECONFIG=~/.kube/gcloud-config
-kubectl get nodes
-# Should show your k3s node!
-```
-
-#### 8. Clone Repo on VM
-
-```bash
-# SSH into VM
 git clone https://github.com/rah7202/urumi-task.git
 cd urumi-task/backend
+npm install
 ```
 
-#### 9. Deploy a Store
+#### 5. Start Backend with PM2
 
 ```bash
-# From local machine with kubectl configured
-export KUBECONFIG=~/.kube/gcloud-config
+npm install -g pm2
 
-helm install prod-store1 ./charts/store-chart \
-  -f ./charts/store-chart/values.yaml \
-  -f ./charts/store-chart/values-prod.yaml \
-  --set ingress.host=prod-store1.YOUR_EXTERNAL_IP.nip.io \
-  --create-namespace -n store-prodstore1
+pm2 start src/server.js --name urumi-backend
+pm2 save
+pm2 startup
 ```
 
-#### 10. Access Your Store
+#### 6. Setup Cloudflare Tunnel
 
-Open browser: `http://prod-store1.YOUR_EXTERNAL_IP.nip.io`
+```bash
+# Download cloudflared
+wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O cloudflared
+chmod +x cloudflared
+sudo mv cloudflared /usr/local/bin/
 
-**Note:** Replace `YOUR_EXTERNAL_IP` with the IP from step 4.
+# Start tunnel and note the HTTPS URL
+cloudflared tunnel --url http://localhost:3001
+
+# Add to PM2 for persistence
+pm2 start "cloudflared tunnel --url http://localhost:3001" --name urumi-tunnel
+pm2 save
+```
+
+#### 7. Deploy Frontend to Vercel
+
+1. Push code to GitHub
+2. Connect repo to [Vercel](https://vercel.com)
+3. Set **Root Directory**: `frontend`
+4. Add environment variable:
+   ```
+   VITE_API_URL = https://your-tunnel-url.trycloudflare.com
+   ```
+5. Deploy!
+
+#### 8. Environment Detection (Auto)
+
+The backend auto-detects production vs local:
+
+```javascript
+// Production detected by kubeconfig existence
+const isProduction = require('fs').existsSync('/home/user/.kube/config') && 
+                     process.env.NODE_ENV !== 'development';
+
+// Store URLs
+const storeHost = isProduction 
+  ? `${storeName}.YOUR_IP.nip.io`    // GCP
+  : `${storeName}.local`;             // Local
+```
+
+#### 9. Helm Values per Environment
+
+| Setting | Local (`values-local.yaml`) | Production (`values-prod.yaml`) |
+|---------|-----------------------------|---------------------------------|
+| Ingress class | `nginx` | `traefik` |
+| Storage class | `hostpath` | `local-path` |
+| Store URL | `store.local` | `store.IP.nip.io` |
+| Pull policy | `IfNotPresent` | `Always` |
+
+#### 10. Updating Tunnel URL
+
+When Cloudflare tunnel restarts it gets a new URL (free tier limitation):
+
+```bash
+# 1. Get new URL
+pm2 stop urumi-tunnel
+cloudflared tunnel --url http://localhost:3001
+# Note new URL
+
+# 2. Update Vercel env var
+# Vercel Dashboard → Settings → Environment Variables → VITE_API_URL
+
+# 3. Redeploy frontend
+git commit --allow-empty -m "trigger: new tunnel url"
+git push origin main
+```
+
+> **Note:** CORS is pre-configured to allow all `*.vercel.app` and `*.trycloudflare.com` domains — no backend changes needed when URL changes.
 
 ---
 
@@ -356,11 +417,11 @@ Open browser: `http://prod-store1.YOUR_EXTERNAL_IP.nip.io`
 
 #### Via Dashboard (Recommended)
 
-1. Open dashboard: `http://localhost:5173` (local) or your deployed frontend
+1. Open dashboard: `http://localhost:5173` (local) or `https://urumi-task.vercel.app` (prod)
 2. Enter store name (e.g., "my-shop")
 3. Select engine: **WordPress + WooCommerce**
 4. Click **"Deploy Store"**
-5. Wait for status to change: `Provisioning` → `Installing` → `Ready` (~2-3 minutes)
+5. Wait for status to change: `Provisioning` → `Installing` → `Ready` (~2-5 minutes)
 6. Click the **external link icon** to open your store
 
 #### Via API
@@ -376,13 +437,15 @@ curl -X POST http://localhost:3001/api/stores \
 
 ### Completing WordPress Setup
 
-1. Open your store URL (e.g., `http://my-shop.local`)
+1. Open your store URL:
+   - **Local:** `http://my-shop.local`
+   - **Production:** `http://my-shop.YOUR_IP.nip.io`
+
 2. **WordPress Installation Wizard:**
    - Site Title: `My Test Store`
    - Username: `admin`
    - Password: (generate & save it!)
    - Email: `admin@example.com`
-   - Search engine visibility: ✅ Discourage (for testing)
    - Click **"Install WordPress"**
 
 3. **Install WooCommerce:**
@@ -392,38 +455,26 @@ curl -X POST http://localhost:3001/api/stores \
    - Click **"Install Now"** → **"Activate"**
 
 4. **WooCommerce Setup Wizard:**
-   - Store details: Fill with dummy data
    - Industry: Choose any (e.g., "Clothing")
-   - Product types: Select **"Physical products"**
-   - Business details: Skip or fill dummy info
-   - **Payments:** ✅ Enable **"Cash on Delivery (COD)"**
-   - Shipping: Use default or skip
-   - **Sample Products:** ✅ **"Yes, import sample products"** (important!)
+   - Payments: ✅ Enable **"Cash on Delivery (COD)"**
+   - Sample Products: ✅ **"Yes, import sample products"**
    - Click **"Finish Setup"**
 
 ### Placing a Test Order
 
-1. Go to storefront: `http://my-shop.local`
-2. Browse sample products (automatically added by WooCommerce)
-3. Click any product → **"Add to Cart"**
-4. Click **"View Cart"** → **"Proceed to Checkout"**
-5. Fill checkout form:
-   - First name: `Test`
-   - Last name: `User`
-   - Address: `123 Test Street`
-   - City: `Test City`
-   - Postcode: `12345`
-   - Phone: `1234567890`
-   - Email: `test@example.com`
-6. Select payment method: **"Cash on Delivery"**
-7. Click **"Place Order"**
-8. ✅ Order confirmation page appears!
+1. Go to storefront
+2. Browse products → **"Add to Cart"**
+3. **"Proceed to Checkout"**
+4. Fill checkout form with test details
+5. Select: **"Cash on Delivery"**
+6. Click **"Place Order"**
+7. ✅ Order confirmation page appears!
 
 ### Verifying the Order
 
-1. Login to WordPress admin: `http://my-shop.local/wp-admin`
+1. Login to WordPress admin: `/wp-admin`
 2. Navigate to: **WooCommerce → Orders**
-3. You should see your test order with status: **"Processing"**
+3. Order status: **"Processing"** ✅
 
 **🎉 Store provisioning and order flow complete!**
 
@@ -441,15 +492,10 @@ curl -X POST http://localhost:3001/api/stores \
 - Strong resource isolation (quotas, limits, network policies)
 - Clean deletion (delete namespace = delete all resources)
 - Native K8s RBAC boundaries
-- Easy to audit per-store resources
 
 **Cons:**
 - Namespace proliferation (100 stores = 100 namespaces)
-- Some cluster-level resources needed per store (Ingress)
 - Slightly higher memory overhead vs shared namespace
-
-**Alternative Considered:** Single namespace with label-based selection
-- Rejected: Weaker isolation, harder cleanup, no native quotas
 
 #### 2. Helm for Templating & Deployment
 
@@ -459,16 +505,10 @@ curl -X POST http://localhost:3001/api/stores \
 - Declarative, versioned deployments
 - Easy rollback (`helm rollback`)
 - Values files for local/prod differences
-- Large ecosystem and tooling
-- Built-in templating (no need for separate tool)
 
 **Cons:**
-- Helm 3 still has some rough edges
 - Learning curve for complex templating
 - No built-in drift detection
-
-**Alternative Considered:** Kustomize
-- Rejected: Less flexibility, no release history, harder multi-env
 
 #### 3. SQLite for Store Metadata
 
@@ -478,31 +518,57 @@ curl -X POST http://localhost:3001/api/stores \
 - Zero-config, no external database
 - Lightweight for prototype/demo
 - Easy backup (single file)
-- Sufficient for <1000 stores
 
 **Cons:**
 - Not horizontally scalable
-- No concurrent write support
 - Single point of failure
 
-**Production Alternative:** PostgreSQL or MySQL with connection pooling
+**Production Alternative:** PostgreSQL with connection pooling
 
-#### 4. Polling for Status Updates
+#### 4. Cloudflare Tunnel for HTTPS
+
+**Choice:** Cloudflare Tunnel to expose backend securely without open ports.
+
+**Pros:**
+- No firewall rules needed
+- Automatic HTTPS (no cert management)
+- DDoS protection included
+- Free tier available
+
+**Cons:**
+- Free tier URLs change on restart
+- Adds latency hop
+- Third-party dependency
+
+**Production Alternative:** Named Cloudflare Tunnel (permanent URL, requires domain)
+
+#### 5. Vercel for Frontend Hosting
+
+**Choice:** Vercel for React frontend hosting.
+
+**Pros:**
+- Global CDN (fast worldwide)
+- Auto-deploy on GitHub push
+- Free tier sufficient
+- Preview deployments
+
+**Cons:**
+- Frontend separate from backend (CORS required)
+- Env var change requires redeploy
+
+#### 6. Polling for Status Updates
 
 **Choice:** Frontend polls `/api/stores/:name/status` every 5 seconds.
 
 **Pros:**
 - Simple implementation
 - No WebSocket infrastructure needed
-- Works through any proxy/firewall
-- Easy to debug
 
 **Cons:**
-- Higher API load (mitigated by caching)
+- Higher API load
 - 5-second latency for status updates
-- Not real-time
 
-**Production Alternative:** WebSockets or Server-Sent Events for true real-time
+**Production Alternative:** WebSockets or Server-Sent Events
 
 ---
 
@@ -510,195 +576,34 @@ curl -X POST http://localhost:3001/api/stores \
 
 #### Store Creation (POST /api/stores)
 
-**Idempotency Strategy:**
-1. Check if namespace already exists before creating
-2. Check if Helm release already exists (409 if duplicate)
-3. Database insert only after successful Helm install
-
-**Failure Scenarios:**
-
 | Failure Point | Handling | Cleanup |
 |---------------|----------|---------|
-| Namespace creation fails | Return 500, no DB record created | N/A |
-| Helm install fails | Delete namespace, return 500 with helm stderr | Automatic |
-| Database insert fails | Helm installed but not tracked | Manual cleanup needed (logged) |
-| Timeout (>15min) | Mark status as `Failed` via cleanup job | Keep resources for debugging |
-
-**Retry Logic:**
-- Helm install failures: User must retry manually
-- Transient K8s API errors: Helm retries internally (3x default)
+| Namespace creation fails | Return 500, no DB record | N/A |
+| Helm install fails | Delete namespace, return 500 | Automatic |
+| Database insert fails | Helm installed but not tracked | Manual cleanup (logged) |
 
 #### Store Deletion (DELETE /api/stores/:name)
 
 **Cleanup Order:**
-1. `helm uninstall` (deletes all Helm-managed resources)
+1. `helm uninstall` (deletes Helm-managed resources)
 2. `kubectl delete namespace` (deletes remaining resources + PVCs)
 3. Remove from SQLite database
 
-**Partial Failure Handling:**
-- If Helm uninstall fails (404): Continue to namespace deletion
-- If namespace deletion fails (404): Continue to DB deletion
-- Always delete from database (ensures UI consistency)
-- Log all warnings for manual follow-up
-
-**Guarantees:**
-- Best-effort cleanup (may leave orphaned resources if K8s unreachable)
-- Database always reflects user intent
-- No silent failures (all errors logged to console)
-
 ---
 
-### Production Changes
+### Production vs Local Differences
 
-#### DNS & Ingress
-
-| Environment | Ingress Controller | Hostname Pattern | Notes |
-|-------------|-------------------|------------------|-------|
-| **Local** | NGINX | `store-name.local` | Requires `/etc/hosts` entries |
-| **Production** | Traefik (k3s default) | `store-name.EXTERNAL_IP.nip.io` | Free wildcard DNS via nip.io |
-| **Production (Custom Domain)** | NGINX or Traefik | `store-name.yourdomain.com` | Requires DNS A records |
-
-**Configuration Changes:**
-```yaml
-# values-local.yaml
-ingress:
-  enabled: true
-  className: "nginx"
-
-# values-prod.yaml
-ingress:
-  enabled: true
-  className: "traefik"  # or "nginx" if installed
-```
-
-**TLS/HTTPS (Production):**
-- Install cert-manager
-- Add `tls:` section to ingress
-- Use Let's Encrypt for free certificates
-
-#### Storage Classes
-
-| Environment | Storage Class | Provisioner | Notes |
-|-------------|---------------|-------------|-------|
-| **Local (Docker Desktop)** | `hostpath` | Docker Desktop | Single-node, local disk |
-| **Local (Minikube)** | `standard` | Minikube | Single-node, local disk |
-| **Production (k3s)** | `local-path` | Rancher local-path-provisioner | Bundled with k3s |
-| **Production (GKE)** | `standard-rwo` | GCE Persistent Disk | Network-attached, regional |
-| **Production (AWS)** | `gp3` | EBS CSI | Network-attached, zonal |
-
-**Configuration:**
-```yaml
-# values-local.yaml
-db:
-  persistence:
-    storageClass: "hostpath"
-
-# values-prod.yaml (k3s)
-db:
-  persistence:
-    storageClass: "local-path"
-```
-
-#### Secrets Management
-
-**Local (Demo):**
-- Hardcoded in `values-local.yaml`: `rootPassword: "local-secret-password"`
-- ⚠️ Acceptable for local testing only
-
-**Production Options:**
-
-1. **Environment-specific values files (Current):**
-   ```yaml
-   # values-prod.yaml (committed to private repo)
-   db:
-     rootPassword: "prod-secure-password-12345"
-   ```
-
-2. **External Secrets Operator (Recommended):**
-   - Fetch secrets from Google Secret Manager / AWS Secrets Manager
-   - Helm values reference secret names only
-   - Secrets never in Git
-
-3. **Sealed Secrets:**
-   - Encrypt secrets with public key
-   - Commit encrypted secrets to Git
-   - Controller decrypts in-cluster with private key
-
-**Best Practice:** Use External Secrets Operator + Cloud KMS for production
-
-#### Resource Limits
-
-**Local (Generous):**
-```yaml
-resources:
-  limits:
-    cpu: "1"
-    memory: "1Gi"
-  requests:
-    cpu: "100m"
-    memory: "256Mi"
-```
-
-**Production (Tighter):**
-```yaml
-resources:
-  limits:
-    cpu: "500m"      # Reduced for shared node
-    memory: "512Mi"  # Reduced to fit more stores
-  requests:
-    cpu: "50m"       # Lower floor
-    memory: "128Mi"  # Lower floor
-```
-
-**ResourceQuota per namespace:**
-```yaml
-# Applied automatically per store
-hard:
-  requests.cpu: "2"
-  requests.memory: "4Gi"
-  limits.cpu: "4"
-  limits.memory: "8Gi"
-  persistentvolumeclaims: "2"
-  requests.storage: "10Gi"
-```
-
-#### Monitoring & Logging
-
-**Local:**
-- Console logs (`kubectl logs`)
-- Manual inspection
-
-**Production Additions:**
-- **Metrics:** Prometheus + Grafana (resource usage, provisioning duration)
-- **Logging:** Loki or ELK Stack (aggregated logs, search)
-- **Tracing:** Jaeger (API request flows)
-- **Alerting:** AlertManager (failed provisions, resource exhaustion)
-
-#### High Availability
-
-**Current (Single-Node):**
-- Local: Docker Desktop (1 node)
-- Production: k3s (1 node, e2-micro)
-
-**Multi-Node Production:**
-- 3+ worker nodes (spread across zones)
-- Pod anti-affinity (no colocated MySQL + WordPress)
-- PVCs with RWX (ReadWriteMany) for shared storage
-- Ingress controller replicas: 3+
-- Backend API replicas: 2+ (add Redis for session sharing)
-
-#### Scaling Considerations
-
-**Current Capacity (Single Node):**
-- ~5-10 stores per e2-micro (2GB RAM)
-- ~20-30 stores per n1-standard-1 (4GB RAM)
-
-**Scaling Bottlenecks:**
-1. **Node Resources:** Add more nodes (horizontal scale)
-2. **Helm Install Speed:** Parallelize installs (queue workers)
-3. **SQLite Writes:** Migrate to PostgreSQL
-4. **API Server:** Add replicas with load balancer
-5. **Ingress Routes:** Single Traefik handles 1000s of routes easily
+| Feature | Local | Production (GCP) |
+|---------|-------|-----------------|
+| Kubernetes | Docker Desktop | k3s on GCP VM |
+| Ingress | NGINX | Traefik |
+| Storage | hostpath | local-path |
+| Store URL | `store.local` | `store.IP.nip.io` |
+| DNS | Windows hosts file | nip.io (automatic) |
+| Frontend | localhost:5173 | Vercel CDN |
+| Backend URL | localhost:3001 | Cloudflare Tunnel |
+| HTTPS | No | Yes (Cloudflare) |
+| Process Manager | npm start | PM2 |
 
 ---
 
@@ -718,7 +623,7 @@ List all stores.
     "engine": "woocommerce",
     "namespace": "store-myshop",
     "status": "Ready",
-    "url": "http://my-shop.local",
+    "url": "http://my-shop.34.135.50.141.nip.io",
     "created_at": "2026-02-13T10:00:00.000Z"
   }
 ]
@@ -744,7 +649,7 @@ Create a new store.
   "status": "Provisioning",
   "storeName": "my-shop",
   "namespace": "store-myshop",
-  "url": "http://my-shop.local"
+  "url": "http://my-shop.34.135.50.141.nip.io"
 }
 ```
 
@@ -752,30 +657,6 @@ Create a new store.
 
 #### `GET /api/stores/:name/status`
 Check store provisioning status.
-
-**Response:**
-```json
-{
-  "status": "Ready",
-  "namespace": "store-myshop",
-  "podsFound": [
-    {
-      "name": "my-shop-mysql-abc123",
-      "phase": "Running",
-      "ready": true
-    },
-    {
-      "name": "my-shop-store-chart-wordpress-def456",
-      "phase": "Running",
-      "ready": true
-    }
-  ],
-  "details": {
-    "wordpressReady": true,
-    "mysqlReady": true
-  }
-}
-```
 
 **Possible Statuses:**
 - `Provisioning` - Resources being created
@@ -788,77 +669,18 @@ Check store provisioning status.
 #### `DELETE /api/stores/:name`
 Delete a store and all its resources.
 
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Store my-shop deleted",
-  "deletedStore": {
-    "name": "my-shop",
-    "namespace": "store-myshop"
-  }
-}
-```
-
 ---
 
-### Metrics Endpoints 
+### Metrics & Admin
 
 #### `GET /api/admin/metrics`
 Get platform metrics.
 
-**Response:**
-```json
-{
-  "total_stores": 5,
-  "by_status": {
-    "provisioning": 1,
-    "ready": 3,
-    "failed": 0,
-    "installing": 1
-  },
-  "by_engine": {
-    "woocommerce": 4,
-    "medusa": 1
-  }
-}
-```
-
----
-
 #### `GET /api/admin/audit?limit=20`
 Get audit log (last N actions).
 
-**Response:**
-```json
-{
-  "total": 42,
-  "entries": [
-    {
-      "timestamp": "2026-02-13T10:30:00.000Z",
-      "action": "create",
-      "storeName": "my-shop",
-      "user": "system",
-      "details": { "engine": "woocommerce" }
-    }
-  ]
-}
-```
-
----
-
 #### `GET /api/health`
 Check system health.
-
-**Response:**
-```json
-{
-  "status": "healthy",
-  "kubernetes": "connected",
-  "database": "connected",
-  "timestamp": "2026-02-13T10:30:00.000Z"
-}
-```
 
 ---
 
@@ -870,10 +692,8 @@ MIT License - see LICENSE file for details.
 
 ## Author
 
-Built for Urumi AI SDE Internship Round 1 by [Rahul Pidiyar]
+Built for Urumi AI SDE Internship Round 1 by Rahul Pidiyar
 
 LinkedIn: https://www.linkedin.com/in/rahul-pidiyar-101115284/
 
-GitHub: https://github.com/7202/urumi-task
-
----
+GitHub: https://github.com/rah7202/urumi-task
